@@ -145,6 +145,9 @@ __all__ = ['GraphMatcher',
            'DiGraphMatcher']
 
 
+_isWildPath = False
+
+
 class GraphMatcher:
     """Implementation of VF2 algorithm for matching undirected graphs.
 
@@ -309,15 +312,50 @@ class GraphMatcher:
             # The mapping is complete.
             yield self.mapping
         else:
+
+
             for G1_node, G2_node in self.candidate_pairs_iter():
+                print("\n\n-------------------------------------------------- MATCH FUNCTION CANDIDATE PAIRS (", G1_node, G2_node, ") --------------------------------------------------")
+
+
                 if self.syntactic_feasibility(G1_node, G2_node):
+                    print("Syntactic Match is True")
+
+
                     if self.semantic_feasibility(G1_node, G2_node):
+                        # Keep an ordered list of successfully matched nodes
+                        # IMPORTANT: Need to reset these at the appropriate time, perhaps when yield mapping is called?
+                        self.core_1_ordered.append(G1_node)
+                        self.core_2_ordered.append(G2_node)
+
+                        print("Core", self.core_1_ordered, self.core_2_ordered)
+
                         # Recursive call, adding the feasible state.
                         newstate = self.state.__class__(self, G1_node, G2_node)
                         yield from self.match()
 
                         # restore data structures
                         newstate.restore()
+
+                    else:
+                        if len(self.core_1_ordered) > 0:
+                            self.core_1_ordered.pop()
+                    
+                        if len(self.core_2_ordered) > 0:
+                            self.core_2_ordered.pop()
+
+                else:
+                    print("Syntactic Match is False")
+
+                    if len(self.core_1_ordered) > 0:
+                        self.core_1_ordered.pop()
+                    
+                    if len(self.core_2_ordered) > 0:
+                        self.core_2_ordered.pop()
+                        
+                   
+
+
 
     def semantic_feasibility(self, G1_node, G2_node):
         """Returns True if adding (G1_node, G2_node) is symantically feasible.
@@ -539,6 +577,8 @@ class DiGraphMatcher(GraphMatcher):
         min_key = self.G2_node_order.__getitem__
 
         # First we compute the out-terminal sets.
+        # self.out_1 is being set from the GM state object, which occurs at the end
+        # of a success node/edge match, but before the next candidate_pairs_iter() call
         T1_out = [node for node in self.out_1 if node not in self.core_1]
         T2_out = [node for node in self.out_2 if node not in self.core_2]
 
@@ -546,8 +586,34 @@ class DiGraphMatcher(GraphMatcher):
         # P(s) = T1_out x {min T2_out}
         if T1_out and T2_out:
             node_2 = min(T2_out, key=min_key)
+
+
+             # Check if node_2 is on the endpoint of a wildPath edge
+            # Get the edge between node_2 and its predecessor (from self.core_2_ordered)
+            preNode = self.core_2_ordered[-1]
+            edgeParameters = self.G2.get_edge_data(preNode, node_2)[0]['data'].parameters
+            isWildPath = False
+
+            # If the edge parameters is not empty, and has a parameter called "path" with a value
+            # of "wildPath", then we have identified a wild path, so extract sucessors beyond
+            # a depth of 1 (e.g. get the successors of the successors)
+            if (len(edgeParameters) > 0 and "path" in edgeParameters and edgeParameters["path"] == "wildPath"):
+                isWildPath = True
+
             for node_1 in T1_out:
-                yield node_1, node_2
+
+                successors = []               
+                if (isWildPath):
+                     # If a wildPath, get successors for each out node with a depth >= 1 (i.e. retrieve successors of successors)
+                    successors.extend(self.getSuccessors(node_1))
+                else:
+                    # Just add the original node to our list, so a successor of depth = 1
+                    successors.append(node_1)
+
+                for node in successors:
+                    yield node, node_2
+
+
 
         # If T1_out and T2_out were both empty....
         # We compute the in-terminal sets.
@@ -576,6 +642,35 @@ class DiGraphMatcher(GraphMatcher):
 
         # For all other cases, we don't have any candidate pairs.
 
+
+
+
+    def getSuccessors(self, node):
+
+        #  T1_out = [node for node in self.out_1 if node not in self.core_1]
+        #  new_nodes.update([successor for successor in GM.G1.successors(node) if successor not in GM.core_1])
+        successors = [node]
+        nCount = 0
+
+        while (True):
+
+            nCount = 0
+
+            for successorNode in successors:
+                successorsOfNode = [node for node in self.G1.successors(successorNode) if node not in self.core_1 and node not in successors]
+
+                successors += successorsOfNode
+
+                nCount += len(successorsOfNode)
+
+            if (nCount == 0):
+                return successors
+
+        return successors
+
+
+        
+
     def initialize(self):
         """Reinitializes the state of the algorithm.
 
@@ -589,6 +684,8 @@ class DiGraphMatcher(GraphMatcher):
         #           provided m is in the mapping.
         self.core_1 = {}
         self.core_2 = {}
+        self.core_1_ordered = []
+        self.core_2_ordered = []
 
         # See the paper for definitions of M_x and T_x^{y}
 

@@ -43,6 +43,7 @@ __all__ = ['GraphMatcher',
 def _semantic_feasibility(self, G1_node, G2_node):
     """Returns True if mapping G1_node to G2_node is semantically feasible.
     """
+    
     # Make sure the nodes match
     if self.node_match is not None:
         nm = self.node_match(self.G1.nodes[G1_node], self.G2.nodes[G2_node])
